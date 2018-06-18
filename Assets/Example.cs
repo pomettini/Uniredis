@@ -6,10 +6,9 @@ public class Example : MonoBehaviour
 {
 	void Start () 
 	{
-		using (Redis redis = new Redis("192.168.23.127"))
-		{
-			Debug.Log(redis.SetKey("pomettini", "ciao"));
-			Debug.Log(redis.GetKey("pomettini"));
-		}
+		Uniredis.Connect();
+		Debug.Log(Uniredis.SetKey("pomettini", "ciao"));
+		Debug.Log(Uniredis.GetKey("pomettini"));
+		Uniredis.Disconnect();
 	}
 }

@@ -6,70 +6,68 @@ using System.IO;
 using System.Text;
 using UnityEngine;
 
-public class Redis : IDisposable
+[CreateAssetMenu(fileName = "Redis", menuName = "Uniredis/Uniredis Client", order = 1)]
+public class Uniredis : ScriptableObject
 {
-	[HideInInspector]
-	public string Host;
-	[HideInInspector]
-	public int Port;
+	[SerializeField]
+	private string Host;
+	[SerializeField]
+	private int Port;
 
-	private Socket socket;
-	private byte[] data;
+	private static Socket socket;
+	private static byte[] data;
 
 	private const string CRLF = "\r\n";
 
-	public Redis (string host)
+	public class UniredisException : Exception
 	{
-		this.Host = host;
-		this.Port = 6379;
+		public UniredisException(string message) : base(message) 
+		{
+		}
 	}
 
-	public class RedisException : Exception
+	public static void Connect ()
 	{
-		public RedisException(string message) : base(message) {}
-	}
+		if (socket != null)
+		{
+			throw new UniredisException("You are already connected");
+		}
 
-	private void Connect ()
-	{
+		Uniredis uniredis = Resources.Load<Uniredis>("Uniredis");
+
 		socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-		socket.Connect(Host, Port);
+		socket.Connect(uniredis.Host, uniredis.Port);
 		// socket.Blocking = false;
 
 		if (!socket.Connected)
 		{
 			socket.Close();
 			socket = null;
-			return;
 		}
 
 		data = new byte[4096];
 	}
 
-	public void Disconnect ()
-	{
-		socket.Close();
-	}
-
-	public string GetKey (string key)
+	public static string GetKey (string key)
 	{
 		String query = String.Format("GET {0}", key);
 		return Query(query);
 	}
 
-	public bool SetKey (string key, string value)
+	public static bool SetKey (string key, string value)
 	{
 		String query = String.Format("SET {0} \"{1}\"", key, value);
 		string result = Query(query);
 
 		if (result != "+OK" + CRLF)
 		{
-			throw new RedisException(result);
+			throw new UniredisException(result);
 		}
 
 		return true;
 	}
 
-	private string Query (string query)
+	private static string Query (string query)
 	{
 		if (socket == null)
 			Connect();
@@ -96,19 +94,10 @@ public class Redis : IDisposable
 		return result;
 	}
 
-	public void Dispose ()
+	public static void Disconnect ()
 	{
-		Dispose(true);
-		GC.SuppressFinalize(this);
-	}
-
-	protected virtual void Dispose (bool disposing)
-	{
-		if (disposing)
-		{
-			Query("QUIT");
-			socket.Close();
-			socket = null;
-		}
+		Query("QUIT");
+		socket.Close();
+		socket = null;
 	}
 }
