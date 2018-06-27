@@ -6,9 +6,20 @@ public class Example : MonoBehaviour
 {
 	void Start () 
 	{
-		Uniredis.Connect();
-		Debug.Log(Uniredis.SetKey("pomettini", "ciao"));
-		Debug.Log(Uniredis.GetKey("pomettini"));
-		Uniredis.Disconnect();
+		Uniredis.Set(this, "ciao", "bello", (error, result) =>
+		{
+			if (error == null)
+			{
+				Debug.Log(result);
+			}
+		});
+
+		Uniredis.Get(this, "ciao", (error, result) =>
+		{
+			if (error == null)
+			{
+				Debug.Log(result);
+			}
+		});
 	}
 }

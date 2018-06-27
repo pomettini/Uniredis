@@ -6,38 +6,22 @@ using System.IO;
 using System.Text;
 using UnityEngine;
 
-[CreateAssetMenu(fileName = "Redis", menuName = "Uniredis/Uniredis Client", order = 1)]
-public class Uniredis : ScriptableObject
+public class UniredisRequest : IDisposable
 {
-	[SerializeField]
-	private string Host;
-	[SerializeField]
-	private int Port;
+	public Socket socket;
+	public List<Socket> ready = new List<Socket>();
 
-	private static Socket socket;
-	private static byte[] data;
-
-	private const string CRLF = "\r\n";
-
-	public class UniredisException : Exception
-	{
-		public UniredisException(string message) : base(message) 
-		{
-		}
-	}
-
-	public static void Connect ()
+	public void Connect ()
 	{
 		if (socket != null)
-		{
-			throw new UniredisException("You are already connected");
+	 	{
+			throw new Exception("You are already connected");
 		}
 
-		Uniredis uniredis = Resources.Load<Uniredis>("Uniredis");
+		Uniredis Uniredis = Resources.Load<Uniredis>("Uniredis");
 
 		socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-		socket.Connect(uniredis.Host, uniredis.Port);
-		// socket.Blocking = false;
+		socket.Connect(Uniredis.Host, Uniredis.Port);
 
 		if (!socket.Connected)
 		{
@@ -45,59 +29,134 @@ public class Uniredis : ScriptableObject
 			socket = null;
 		}
 
-		data = new byte[4096];
+		socket.Blocking = false;
 	}
 
-	public static string GetKey (string key)
+	public void Disconnect ()
+	{
+		socket.Close();
+		socket = null;
+	}
+
+	public void Dispose ()
+	{
+		Dispose(true);
+		GC.SuppressFinalize(this);
+	}
+
+	protected virtual void Dispose (bool disposing)
+	{
+		if (disposing)
+		{
+			// CALL REDIS QUIT
+			Disconnect();
+		}
+	}
+}
+
+[CreateAssetMenu(fileName = "Uniredis", menuName = "Uniredis/Uniredis Client", order = 1)]
+public class Uniredis : ScriptableObject
+{
+	[SerializeField]
+	public string Host;
+	[SerializeField]
+	public int Port;
+
+	private const string CRLF = "\r\n";
+
+	public static void Get (MonoBehaviour launcher, string key, Action<string, string> callback)
 	{
 		String query = String.Format("GET {0}", key);
-		return Query(query);
+
+		launcher.StartCoroutine(Uniredis.Query(query, (result) =>
+		{
+			callback(null, ParseGetResponse(result));
+		}));
 	}
 
-	public static bool SetKey (string key, string value)
+	public static void Set (MonoBehaviour launcher, string key, object value, Action<string, bool> callback)
 	{
-		String query = String.Format("SET {0} \"{1}\"", key, value);
-		string result = Query(query);
+		String query = String.Format("SET {0} {1}", key, value);
 
-		if (result != "+OK" + CRLF)
+		launcher.StartCoroutine(Uniredis.Query(query, (result) =>
 		{
-			throw new UniredisException(result);
-		}
-
-		return true;
+			callback(null, ParseSetResponse(result));
+		}));
 	}
 
-	private static string Query (string query)
+	private static IEnumerator Query (string query, Action<string> callback) 
 	{
-		if (socket == null)
-			Connect();
-
-		string result = String.Empty;
-
-		while (true)
+		using (UniredisRequest redis = new UniredisRequest())
 		{
-			data = Encoding.ASCII.GetBytes(query + CRLF);
-			int length = socket.Send(data);
+			redis.Connect();
 
-			byte[] dataReceived = new byte[4096];
-			int dataReceiveLength = socket.Receive(dataReceived);
+			byte[] data = new byte[1024];
+			string result = String.Empty;
+			int packetLength = -1;
 
-			if (length <= 0)
+			var request = Encoding.ASCII.GetBytes(query + CRLF);
+			redis.socket.Send(request);
+
+			while (true)
 			{
-				break;
-			}
+				List<Socket> r = new List<Socket>();
+				r.Add(redis.socket);
+				Socket.Select(r, null, null, 0);
 
-			result = Encoding.ASCII.GetString(dataReceived, 0, dataReceiveLength);
-			return result;
+				foreach (Socket readySocket in r)	
+				{
+					packetLength = readySocket.Receive(data);
+
+					if (packetLength > 0)
+					{
+						result = Encoding.ASCII.GetString(data, 0, packetLength);
+						callback(result);
+						yield break;
+					}
+					else
+					{
+						yield break;
+					}
+				}
+
+				yield return null;
+			}
+		}
+	}
+
+	public static string ParseGetResponse (string input)
+	{
+		string result = null;
+
+		if (input.Length == 0)
+			return null;
+
+		if (input[0] == '-')
+			return null;
+
+		if (input[0] == '$')
+		{
+			if (input == "$-1")
+				return null;
+
+			String[] substrings = input.Split(new char[] {'\r', '\n'}, StringSplitOptions.RemoveEmptyEntries);
+			result = substrings[1];
 		}
 
 		return result;
 	}
 
-	public static void Disconnect ()
+	public static bool ParseSetResponse (string input)
 	{
-		Query("QUIT");
-		socket.Close();
-		socket = null;
+		if (input.Length == 0)
+			return false;
+
+		if (input[0] == '-')
+			return false;
+
+		if (input[0] == '+')
+			return true;
+
+		return false;
 	}
 }
